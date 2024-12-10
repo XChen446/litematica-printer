@@ -8,7 +8,6 @@ import fi.dy.masa.litematica.selection.Box;
 import fi.dy.masa.litematica.util.EasyPlaceProtocol;
 import fi.dy.masa.litematica.util.InventoryUtils;
 import fi.dy.masa.litematica.util.PlacementHandler;
-import fi.dy.masa.litematica.util.WorldUtils;
 import fi.dy.masa.litematica.world.SchematicWorldHandler;
 import fi.dy.masa.litematica.world.WorldSchematic;
 import fi.dy.masa.malilib.config.IConfigOptionListEntry;
@@ -19,27 +18,23 @@ import me.aleksilassila.litematica.printer.interfaces.Implementation;
 import me.aleksilassila.litematica.printer.mixin.masa.Litematica_InventoryUtilsMixin;
 import me.aleksilassila.litematica.printer.mixin.masa.WorldUtilsAccessor;
 import me.aleksilassila.litematica.printer.printer.bedrockUtils.BreakingFlowController;
-import me.aleksilassila.litematica.printer.printer.bedrockUtils.Messager;
+import me.aleksilassila.litematica.printer.printer.zxy.Utils.PinYinSearch;
+import me.aleksilassila.litematica.printer.printer.zxy.Utils.BlockFilters;
 import me.aleksilassila.litematica.printer.printer.zxy.inventory.OpenInventoryPacket;
 import me.aleksilassila.litematica.printer.printer.zxy.inventory.SwitchItem;
 import me.aleksilassila.litematica.printer.printer.zxy.Utils.Verify;
 import me.aleksilassila.litematica.printer.printer.zxy.Utils.ZxyUtils;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.block.*;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.block.entity.ChestBlockEntity;
-import net.minecraft.block.enums.ChestType;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.world.ClientWorld;
-import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.fluid.Fluids;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
-import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.text.Text;
@@ -49,12 +44,12 @@ import net.minecraft.util.collection.DefaultedList;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.math.Vec3i;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Method;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static fi.dy.masa.litematica.selection.SelectionMode.NORMAL;
 import static fi.dy.masa.litematica.util.WorldUtils.applyCarpetProtocolHitVec;
@@ -64,12 +59,14 @@ import static fi.dy.masa.tweakeroo.config.Configs.Lists.BLOCK_TYPE_BREAK_RESTRIC
 import static fi.dy.masa.tweakeroo.tweaks.PlacementTweaks.BLOCK_TYPE_BREAK_RESTRICTION;
 import static me.aleksilassila.litematica.printer.LitematicaMixinMod.*;
 import static me.aleksilassila.litematica.printer.printer.Printer.TempData.*;
-import static me.aleksilassila.litematica.printer.printer.zxy.inventory.InventoryUtils.isInventory;
+import static me.aleksilassila.litematica.printer.printer.zxy.Utils.BlockFilters.equalsBlockName;
 import static me.aleksilassila.litematica.printer.printer.zxy.inventory.OpenInventoryPacket.openIng;
 import static me.aleksilassila.litematica.printer.printer.zxy.Utils.Statistics.closeScreen;
+import static me.aleksilassila.litematica.printer.printer.zxy.inventory.OpenInventoryPacket.pos;
 import static me.aleksilassila.litematica.printer.printer.zxy.inventory.SwitchItem.reSwitchItem;
 import static me.aleksilassila.litematica.printer.printer.zxy.Utils.ZxyUtils.*;
-
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 //#if MC >= 12001
 import me.aleksilassila.litematica.printer.printer.zxy.chesttracker.MemoryUtils;
 import me.aleksilassila.litematica.printer.printer.zxy.chesttracker.SearchItem;
@@ -99,6 +96,7 @@ import net.minecraft.registry.Registries;
 //#endif
 
 public class Printer extends PrinterUtils {
+    private static final Logger log = LoggerFactory.getLogger(Printer.class);
     public static boolean up = true;
 
     public static class TempData {
@@ -156,16 +154,6 @@ public class Printer extends PrinterUtils {
             } else {
                 return true;
             }
-        }
-
-        public ClientPlayerEntity player;
-        public ClientWorld world;
-        public WorldSchematic worldSchematic;
-
-        public TempData(ClientPlayerEntity player, ClientWorld world, WorldSchematic worldSchematic) {
-            this.player = player;
-            this.world = world;
-            this.worldSchematic = worldSchematic;
         }
     }
 
@@ -281,6 +269,64 @@ public class Printer extends PrinterUtils {
         }
         return pos;
     }
+    public BlockPos currPos = null;
+    public BlockPos basePos = null;
+    BlockPos getBlockPos2() {
+        if (timedOut()) return null;
+        ClientPlayerEntity player = client.player;
+        if (player == null) return null;
+        if(basePos == null) {
+            basePos = player.getBlockPos();
+            return null;
+        }
+        int px = basePos.getX();
+        int py = basePos.getY();
+        int pz = basePos.getZ();
+        int x1,y1,z1;
+        if (currPos == null) {
+            x1 = px-range1;
+            z1 = pz-range1;
+            y1 = yDegression ? py+range1 : py-range1;
+            currPos = new BlockPos(x1,y1,z1);
+            return currPos;
+        }else {
+            x1=currPos.getX();
+            y1=currPos.getY();
+            z1=currPos.getZ();
+        }
+
+        x1++;
+        if (x1 - px > range1) {
+            x1 = px - range1;
+            z1++;
+        }
+        if (z1 - pz > range1) {
+            z1 = pz - range1;
+            if (yDegression) {
+                y1--;
+            } else {
+                y1++;
+            }
+            if(yDegression ? y1 - py < -range1 : y1 - py > range1){
+                y1 = yDegression ? py + range1 : py - range1;
+            }
+        }
+        //移动后会触发，频繁重置pos会浪费性能
+        if (Math.abs(x1 - player.getBlockX()) > range1 || Math.abs(z1 - player.getBlockZ()) > range1 || Math.abs(y1 - player.getBlockY()) > range1) {
+            currPos = null;
+            basePos = null;
+            return null;
+        }
+        if (px - x1 == range1 && (yDegression ? py - y1 : py + y1) == range1 && pz - z1 == range1){
+            BlockPos tempPos = currPos;
+            currPos = null;
+            basePos = null;
+            return tempPos;
+        }else {
+            currPos = new BlockPos(x1,y1,z1);
+            return currPos;
+        }
+    }
 
     //根据当前毫秒值判断是否超出了屏幕刷新率
     boolean timedOut() {
@@ -288,15 +334,13 @@ public class Printer extends PrinterUtils {
         return System.currentTimeMillis() > frameGenerationTime + startTime;
     }
 
-
-
     void fluidMode() {
 
 //        for (int y = range; y > -range - 1; y--) {
 //            for (int x = -range; x < range + 1; x++) {
 //                for (int z = -range; z < range + 1; z++) {
         BlockPos pos;
-        while ((pos = getBlockPos()) != null && client.world != null && client.player != null) {
+        while ((pos = getBlockPos2()) != null && client.world != null && client.player != null) {
             BlockState currentState = client.world.getBlockState(pos);
             if (client.player != null && !canInteracted(pos)) continue;
             if (!TempData.xuanQuFanWeiNei_p(pos)) continue;
@@ -343,7 +387,7 @@ public class Printer extends PrinterUtils {
 
     void miningMode() {
         BlockPos pos;
-        while ((pos = tempPos == null ? getBlockPos() : tempPos) != null) {
+        while ((pos = tempPos == null ? getBlockPos2() : tempPos) != null) {
             if (client.player != null && !canInteracted(pos)) {
                 if (tempPos == null) continue;
                 tempPos = null;
@@ -417,6 +461,7 @@ public class Printer extends PrinterUtils {
     static boolean breakRestriction(BlockState blockState,BlockPos pos) {
         if(EXCAVATE_LIMITER.getOptionListValue().equals(State.ExcavateListMode.TW)){
             if (!FabricLoader.getInstance().isModLoaded("tweakeroo")) return true;
+//            return isPositionAllowedByBreakingRestriction(pos,Direction.UP);
             UsageRestriction.ListType listType = BLOCK_TYPE_BREAK_RESTRICTION.getListType();
             if (listType == UsageRestriction.ListType.BLACKLIST) {
                 return BLOCK_TYPE_BREAK_RESTRICTION_BLACKLIST.getStrings().stream()
@@ -440,42 +485,26 @@ public class Printer extends PrinterUtils {
             }
         }
     }
-    public static boolean equalsBlockName(String blockName, BlockState blockState,BlockPos pos){
-        String string = Registries.BLOCK.getId(blockState.getBlock()).toString();
-
-        if (blockName.length() > 2) {
-            String fix = null;
-            String[] split = blockName.split("-");
-            fix = split[split.length-1];
-            if ("a".equals(fix)) {  //方块全称
-                String substring = blockName.substring(0, blockName.length() - 2);
-                if (substring.equals(string)) {
-                    return true;
-                }
-                //容器
-            }else if ("inventory".equals(fix) && isInventory(ZxyUtils.client.world,pos)){
-                return true;
-            }else if("all".equals(fix)){ //所有方块
-                return true;
-            }
-        }
-       return string.contains(blockName);
-    }
-
     public static int moveTick = 0;
     public static Vec3d itemPos = null;
+    public static ItemStack offHandItem = null;
     //此模式依赖bug运行 请勿随意修改
     public void bedrockMode() {
+
+//        if (!client.player.getOffHandStack().isEmpty()){
+//            offHandItem = client.player.getOffHandStack();
+//        }else offHandItem = null;
+
         BreakingFlowController.tick();
         int maxy = -9999;
         range2 = bedrockModeRange();
         BlockPos pos;
-        while ((pos = getBlockPos()) != null && client.world != null) {
+        while ((pos = getBlockPos2()) != null && client.world != null) {
             if (!ZxyUtils.bedrockCanInteracted(pos,getRage())) continue;
             if (isLimitedByTheNumberOfLayers(pos)) continue;
             BlockState currentState = client.world.getBlockState(pos);
 //                    if (currentState.isOf(Blocks.PISTON) && !data.world.getBlockState(pos.down()).isOf(Blocks.BEDROCK)) {
-            if (currentState.isOf(Blocks.PISTON) && !bedrockModeTarget(client.world.getBlockState(pos.down()).getBlock()) && xuanQuFanWeiNei_p(pos,3)) {
+            if (currentState.isOf(Blocks.PISTON) && !bedrockModeTarget(client.world.getBlockState(pos.down())) && xuanQuFanWeiNei_p(pos,3)) {
                 BreakingFlowController.addPosList(pos);
             } else if (currentState.isOf(Blocks.PISTON_HEAD)) {
                 switchToItems(client.player, new Item[]{Items.AIR, Items.DIAMOND_PICKAXE});
@@ -485,14 +514,23 @@ public class Printer extends PrinterUtils {
 
 //                    if (TempData.xuanQuFanWeiNei_p(pos) && currentState.isOf(Blocks.BEDROCK)  && ZxyUtils.canInteracted(pos,range-1.5) && !client.world.getBlockState(pos.up()).isOf(Blocks.BEDROCK)) {
             if (TempData.xuanQuFanWeiNei_p(pos) &&
-                    bedrockModeTarget(currentState.getBlock()) &&
+                    bedrockModeTarget(currentState) &&
                     ZxyUtils.bedrockCanInteracted(pos, getRage() - 1.5) &&
-                    !bedrockModeTarget(client.world.getBlockState(pos.up()).getBlock())) {
+                    !bedrockModeTarget(client.world.getBlockState(pos.up()))) {
                 if (maxy == -9999) maxy = y1;
                 if (y1 < maxy) return;
                 BreakingFlowController.addBlockPosToList(pos);
             }
         }
+//        if (offHandItem != null){
+//            PlayerScreenHandler sc = client.player.playerScreenHandler;
+//            int i1 = -1;
+//            for (int i = 0; i < sc.slots.size(); i++) {
+//                if (fi.dy.masa.malilib.util.InventoryUtils.areStacksEqual(sc.slots.get(i).getStack(),offHandItem)) i1 = i;
+//            }
+//            if (i1 != -1) client.interactionManager.clickSlot(client.player.currentScreenHandler.syncId, i1, 40, SlotActionType.SWAP, client.player);
+//        }
+
 
         //尝试移动到掉落物位置。。。
 //        if (moveTick < 20) return;
@@ -524,8 +562,9 @@ public class Printer extends PrinterUtils {
         return LitematicaMixinMod.RANGE_MODE.getOptionListValue() == State.ListType.SPHERE ? getRage() : 6;
     }
 
-    public static boolean bedrockModeTarget(Block block) {
-        return LitematicaMixinMod.BEDROCK_LIST.getStrings().stream().anyMatch(string -> Registries.BLOCK.getId(block).toString().contains(string));
+    public static boolean bedrockModeTarget(BlockState block) {
+//        return LitematicaMixinMod.BEDROCK_LIST.getStrings().stream().anyMatch(string -> Registries.BLOCK.getId(block.getBlock()).toString().contains(string));
+        return LitematicaMixinMod.BEDROCK_LIST.getStrings().stream().anyMatch(string -> equalsBlockName(string,block));
     }
 
     public boolean verify() {
@@ -570,9 +609,9 @@ public class Printer extends PrinterUtils {
                 for (Item item : items2) {
                      //#if MC >= 12001
                         //#if MC > 12004
-                        //$$ MemoryUtils.currentMemoryKey = client.world.getRegistryKey().getValue();
+                        MemoryUtils.currentMemoryKey = client.world.getRegistryKey().getValue();
                         //#else
-                        MemoryUtils.currentMemoryKey = client.world.getDimensionKey().getValue();
+                        //$$ MemoryUtils.currentMemoryKey = client.world.getDimensionKey().getValue();
                         //#endif
                       MemoryUtils.itemStack = new ItemStack(item);
                       if (SearchItem.search(true)) {
@@ -639,6 +678,7 @@ public class Printer extends PrinterUtils {
         yDegression = false;
         startTime = System.currentTimeMillis();
         tickRate = LitematicaMixinMod.PRINT_INTERVAL.getIntegerValue();
+        basePos = pEntity.getBlockPos();
 
         tick = tick == 0x7fffffff ? 0 : tick + 1;
         boolean easyModeBooleanValue = LitematicaMixinMod.EASY_MODE.getBooleanValue();
@@ -696,7 +736,7 @@ public class Printer extends PrinterUtils {
         // forEachBlockInRadius:
         BlockPos pos;
         z:
-        while ((pos = getBlockPos()) != null) {
+        while ((pos = getBlockPos2()) != null) {
             if (client.player != null && !canInteracted(pos)) continue;
             BlockState requiredState = worldSchematic.getBlockState(pos);
             PlacementGuide.Action action = guide.getAction(world, worldSchematic, pos);
@@ -704,7 +744,8 @@ public class Printer extends PrinterUtils {
 
             //跳过放置
             if (LitematicaMixinMod.PUT_SKIP.getBooleanValue() &&
-                    PUT_SKIP_LIST.getStrings().stream().anyMatch(block -> Registries.BLOCK.getId(requiredState.getBlock()).toString().contains(block))
+//                    PUT_SKIP_LIST.getStrings().stream().anyMatch(block -> Registries.BLOCK.getId(requiredState.getBlock()).toString().contains(block))
+                    PUT_SKIP_LIST.getStrings().stream().anyMatch(block -> equalsBlockName(block,requiredState))
 //                   && PUT_SKIP_LIST.getStrings().contains(Registries.BLOCK.getId(requiredState.getBlock()).toString())
                    ) {
                 continue;
@@ -890,8 +931,9 @@ public class Printer extends PrinterUtils {
                         if (client.world != null) {
                             state = client.world.getBlockState(pos);
                         }
-                        Block block = state.getBlock();
-                        if (Registries.BLOCK.getId(block).toString().contains(blockName)) {
+//                        Block block = state.getBlock();
+//                        if (Registries.BLOCK.getId(block).toString().contains(blockName)) {
+                        if (equalsBlockName(blockName,state)) {
                             blocks.add(pos);
                         }
                     }
@@ -929,7 +971,7 @@ public class Printer extends PrinterUtils {
                             int c = Integer.parseInt(s) - 1;
                             if (Registries.ITEM.getId(player.getInventory().getStack(c).getItem()).toString().contains("shulker_box") &&
                                     LitematicaMixinMod.QUICKSHULKER.getBooleanValue()) {
-                                MinecraftClient.getInstance().inGameHud.setOverlayMessage(Text.of("没有可替换的槽位，请将预选位的濳影盒换个位置"), false);
+                                MinecraftClient.getInstance().inGameHud.setOverlayMessage(Text.of("濳影盒占用了预选栏"), false);
                                 continue;
                             }
 //                            System.out.println(y);
