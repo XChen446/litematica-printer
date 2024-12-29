@@ -63,9 +63,8 @@ public class TargetBlock {
                 break;
             case EXTENDED:
                 //#if MC > 12006
-                //$$ Item item = client.player.getMainHandStack().getItem();
-                //$$ System.out.println(item.toString());
-                //$$ if(!(item.equals(Items.NETHERITE_PICKAXE) || item.equals(Items.DIAMOND_PICKAXE)) || !switchPickaxe) break;
+                Item item = client.player.getMainHandStack().getItem();
+                if(!(item.equals(Items.NETHERITE_PICKAXE) || item.equals(Items.DIAMOND_PICKAXE)) || !switchPickaxe) break;
                 //#endif
                 //打掉红石火把
                 ArrayList<BlockPos> nearByRedstoneTorchPosList = CheckingEnvironment.findNearbyRedstoneTorch(world, pistonBlockPos);
@@ -78,22 +77,9 @@ public class TargetBlock {
                     addPosList(pistonBlockPos.up(i));
                 }
                 //放置朝下的活塞
-                //#if MC > 12006
-                //$$ pistonIsBreak = true;
-                //$$ List<TargetBlock> list = cachedTargetBlockList.stream().filter(targetBlock -> targetBlock.status == Status.EXTENDED).toList();
-                //$$ if (list.stream().allMatch(targetBlock -> targetBlock.pistonIsBreak)) {
-                //$$     list.forEach(targetBlock -> {
-                //$$         BlockPlacer.pistonPlacement(targetBlock.pistonBlockPos, Direction.DOWN);
-                //$$         targetBlock.hasTried = true;
-                //$$         targetBlock.status = Status.NEEDS_WAITING;
-                //$$     });
-                //$$ }
-                //$$ break;
-                //#else
                 BlockPlacer.pistonPlacement(this.pistonBlockPos, Direction.DOWN);
                 this.hasTried = true;
                 break;
-                //#endif
             case RETRACTED:
                 addPosList(pistonBlockPos);
                 addPosList(pistonBlockPos.up());
@@ -123,12 +109,6 @@ public class TargetBlock {
 //                BlockBreaker.breakBlock(world, pistonBlockPos.up());
                 break;
             case NEEDS_WAITING:
-                //#if MC > 12006
-                //$$ if (pistonIsBreak) {
-                //$$     pistonIsBreak = false;
-                //$$     break;
-                //$$ }
-                //#endif
                 break;
         }
         return null;
@@ -181,7 +161,7 @@ public class TargetBlock {
                 this.status = Status.FAILED;
                 Messager.actionBar("bedrockminer.fail.place.redstonetorch");
             }
-        } else if (!Printer.bedrockModeTarget( this.world.getBlockState(this.blockPos).getBlock()) && this.world.getBlockState(this.pistonBlockPos).isOf(Blocks.PISTON)) {
+        } else if (!Printer.bedrockModeTarget( this.world.getBlockState(this.blockPos)) && this.world.getBlockState(this.pistonBlockPos).isOf(Blocks.PISTON)) {
             this.status = Status.RETRACTED;
         } else if (this.world.getBlockState(this.pistonBlockPos).isOf(Blocks.PISTON) && this.world.getBlockState(this.pistonBlockPos).get(PistonBlock.EXTENDED)) {
             this.status = Status.EXTENDED;
@@ -190,7 +170,7 @@ public class TargetBlock {
         }  else if (this.world.getBlockState(this.pistonBlockPos).isOf(Blocks.PISTON) &&
                 !this.world.getBlockState(this.pistonBlockPos).get(PistonBlock.EXTENDED) &&
                 CheckingEnvironment.findNearbyRedstoneTorch(this.world, this.pistonBlockPos).size() != 0 &&
-                Printer.bedrockModeTarget( this.world.getBlockState(this.blockPos).getBlock())) {
+                Printer.bedrockModeTarget( this.world.getBlockState(this.blockPos))) {
             this.status = Status.UNEXTENDED_WITH_POWER_SOURCE;
         } else if (this.hasTried && this.world.getBlockState(this.pistonBlockPos).isOf(Blocks.PISTON) && this.stuckTicksCounter < 15) {
             this.status = Status.NEEDS_WAITING;
@@ -199,7 +179,7 @@ public class TargetBlock {
                 this.world.getBlockState(this.pistonBlockPos).get(PistonBlock.FACING) == Direction.DOWN &&
                 !this.world.getBlockState(this.pistonBlockPos).get(PistonBlock.EXTENDED) &&
                 CheckingEnvironment.findNearbyRedstoneTorch(this.world, this.pistonBlockPos).size() != 0 &&
-                Printer.bedrockModeTarget( this.world.getBlockState(this.blockPos).getBlock())) {
+                Printer.bedrockModeTarget( this.world.getBlockState(this.blockPos))) {
             this.status = Status.STUCK;
             this.hasTried = false;
             this.stuckTicksCounter = 0;
@@ -207,7 +187,7 @@ public class TargetBlock {
                 !this.world.getBlockState(this.pistonBlockPos).get(PistonBlock.EXTENDED) &&
                 this.world.getBlockState(this.pistonBlockPos).get(PistonBlock.FACING) == Direction.UP &&
                 CheckingEnvironment.findNearbyRedstoneTorch(this.world, this.pistonBlockPos).size() == 0 &&
-                Printer.bedrockModeTarget( this.world.getBlockState(this.blockPos).getBlock())) {
+                Printer.bedrockModeTarget( this.world.getBlockState(this.blockPos))) {
             this.status = Status.UNEXTENDED_WITHOUT_POWER_SOURCE;
         } else if (CheckingEnvironment.has2BlocksOfPlaceToPlacePiston(world, this.blockPos)) {
             this.status = Status.UNINITIALIZED;
