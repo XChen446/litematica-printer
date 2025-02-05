@@ -7,9 +7,9 @@ import fi.dy.masa.malilib.event.RenderEventHandler;
 import fi.dy.masa.malilib.interfaces.IRenderer;
 import fi.dy.masa.malilib.render.RenderUtils;
 import fi.dy.masa.malilib.util.Color4f;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.ShapeContext;
-import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.client.render.*;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.Entity;
@@ -20,29 +20,45 @@ import net.minecraft.util.shape.VoxelShapes;
 import org.joml.Matrix4f;
 import org.lwjgl.opengl.GL11;
 
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
+import java.lang.reflect.Method;
+import java.util.*;
 
+import static fi.dy.masa.litematica.render.RenderUtils.renderAreaSidesBatched;
 import static me.aleksilassila.litematica.printer.printer.zxy.Utils.ZxyUtils.client;
+import static net.minecraft.client.render.VertexFormats.POSITION_COLOR;
 
 public class HighlightBlockRenderer implements IRenderer {
-    public record HighlightTheProject(ConfigColor color4f, List<BlockPos> pos){ }
     public static HighlightBlockRenderer instance = new HighlightBlockRenderer();
+    public record HighlightTheProject(ConfigColor color4f, Set<BlockPos> pos){}
     public static Map<String,HighlightTheProject> highlightTheProjectMap = new HashMap<>();
+    public static String threadName = "litematica-printer-render";
+    public static boolean shaderIng = false;
     public static void createHighlightBlockList(String id,ConfigColor color4f){
         if (highlightTheProjectMap.get(id) == null) {
-            highlightTheProjectMap.put(id,new HighlightTheProject(color4f,new LinkedList<>()));
+            highlightTheProjectMap.put(id,new HighlightTheProject(color4f,new LinkedHashSet <>()));
         }
     }
-    public static List<BlockPos> getHighlightBlockPosList(String id){
+    public static Set<BlockPos> getHighlightBlockPosList(String id){
         if(highlightTheProjectMap.get(id) != null){
             return highlightTheProjectMap.get(id).pos();
         }
         return null;
     }
+    public static List<String> clearList = new LinkedList<>();
+    public static void clear(String id){
+        if (!clearList.contains(id)) clearList.add(id);
+    }
+    public static Map<String,Set<BlockPos>> setMap = new HashMap<>();
+    public static void setPos(String id,Set<BlockPos> posSet){
+        HighlightTheProject highlightTheProject = highlightTheProjectMap.get(id);
+        if (highlightTheProject != null && posSet != null) {
+            setMap.put(id,posSet);
+        }
+    }
+    public static Method method;
+
     public void highlightBlock(Color4f color4f, BlockPos pos) {
+
         BlockState blockState = client.world.getBlockState(pos);
         Entity cameraEntity = client.cameraEntity;
         if(cameraEntity == null) return;
@@ -66,11 +82,15 @@ public class HighlightBlockRenderer implements IRenderer {
         RenderSystem.depthMask(false);
         RenderSystem.enableBlend();
         RenderSystem.disableCull();
-        RenderSystem.setShader(GameRenderer::getPositionColorProgram);
-//        RenderSystem.setShader(GameRenderer::getPositionColorShader);
+        //#if MC > 12101
+
+        //#else
+        //$$ RenderSystem.setShader(GameRenderer::getPositionColorProgram);
+        //#endif
+
         Tessellator instance = Tessellator.getInstance();
         //#if MC > 12006
-        BufferBuilder buffer = instance.begin(VertexFormat.DrawMode.QUADS,VertexFormats.POSITION_COLOR);
+        BufferBuilder buffer = instance.begin(VertexFormat.DrawMode.QUADS, POSITION_COLOR);
         //#else
         //$$ BufferBuilder buffer = instance.getBuffer();
         //#endif
@@ -98,9 +118,6 @@ public class HighlightBlockRenderer implements IRenderer {
         //$$                 color4f, buffer));
         //#endif
 
-
-
-
         //#if MC > 12006
         try
         {
@@ -125,16 +142,77 @@ public class HighlightBlockRenderer implements IRenderer {
 
         GL11.glDisable(GL11.GL_POLYGON_OFFSET_FILL);
     }
-//    public void test3(MatrixStack matrices){
-//
-//        BlockPos pos1 = client.player.getBlockPos().up(-1);
-//        BlockPos pos2 = client.player.getBlockPos().up(-2);
-//        fi.dy.masa.litematica.render.RenderUtils.renderAreaSides(pos1, pos1, new Color4f(1,1,0,0.5F), matrices, client);
-//    }
+
+    //#if MC > 12004
+    public void test3(Matrix4f matrices,Color4f color4f, Set<BlockPos> posSet){
+    //#else
+    //$$ public void test3(MatrixStack matrices ,Color4f color4f, Set<BlockPos> posSet){
+    //#endif
+//        for (BlockPos pos : posSet) {
+//            renderAreaSides(pos,pos,color4f,matrices,client);
+//        }
+
+        RenderSystem.enableBlend();
+        RenderSystem.disableCull();
+
+        //#if MC > 12101
+        //#else
+        //$$ RenderSystem.setShader(GameRenderer::getPositionColorProgram);
+        //#endif
+        Tessellator tessellator = Tessellator.getInstance();
+
+        //#if MC > 12006
+        BufferBuilder buffer = tessellator.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
+        BuiltBuffer meshData;
+        //#else
+        //$$ BufferBuilder buffer = tessellator.getBuffer();
+        //$$ buffer.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR);
+        //#endif
+        for (BlockPos pos : posSet) {
+            renderAreaSidesBatched(pos, pos, color4f, 0.002, buffer, client);
+        }
+
+        try
+        {
+            if(buffer != null){
+                //#if MC > 12006
+                meshData = buffer.end();
+                BufferRenderer.drawWithGlobalProgram(meshData);
+                meshData.close();
+                //#else
+                //$$ tessellator.draw();
+                //#endif
+            }
+        }
+        catch (Exception e)
+        {
+//            Litematica.logger.error("renderAreaSides: Failed to draw Area Selection box (Error: {})", e.getLocalizedMessage());
+        }
+
+        RenderSystem.enableCull();
+        RenderSystem.disableBlend();
+
+//        fi.dy.masa.litematica.render.RenderUtils.renderAreaSides(pos, pos, color4f, matrices, client);
+    }
 
     //如果不注册无法渲染，
     public static void init(){
         RenderEventHandler.getInstance().registerWorldLastRenderer(instance);
+//        MyThreadManager.createThread(threadName,new Thread(() -> {
+//            while (!Thread.currentThread().isInterrupted()){
+//                try {
+//                    Thread.sleep(80);
+//                } catch (InterruptedException ignored) {}
+//
+//
+//            }
+//        }));
+
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, client1) -> {
+            for (Map.Entry<String, HighlightTheProject> stringHighlightTheProjectEntry : highlightTheProjectMap.entrySet()) {
+                stringHighlightTheProjectEntry.getValue().pos.clear();
+            }
+        });
     }
 
     @Override
@@ -143,14 +221,33 @@ public class HighlightBlockRenderer implements IRenderer {
     //#else
     //$$ public void onRenderWorldLast(MatrixStack matrices, Matrix4f projMatrix){
     //#endif
+        //更改渲染
+        setMap.forEach((k,v) -> {
+            HighlightTheProject highlightTheProject = highlightTheProjectMap.get(k);
+            if(highlightTheProject != null){
+                highlightTheProject.pos.clear();
+                highlightTheProject.pos.addAll(v);
+            }
+        });
+        setMap.clear();
 
-        for (Map.Entry<String, HighlightTheProject> stringHighlightTheProjectEntry : highlightTheProjectMap.entrySet()) {
-            HighlightTheProject value = stringHighlightTheProjectEntry.getValue();
-            List<BlockPos> pos = value.pos;
-            Color4f color = value.color4f.getColor();
-            for (BlockPos p : pos) {
-                instance.highlightBlock(color,p);
+        for (String string : clearList) {
+            HighlightTheProject highlightTheProject = highlightTheProjectMap.get(string);
+            if (highlightTheProject != null) {
+                highlightTheProject.pos.clear();
             }
         }
+        clearList.clear();
+
+        shaderIng = true;
+        highlightTheProjectMap.entrySet().stream().parallel().forEach(stringHighlightTheProjectEntry -> {
+            String key = stringHighlightTheProjectEntry.getKey();
+            HighlightTheProject value = stringHighlightTheProjectEntry.getValue();
+
+            Color4f color = value.color4f.getColor();
+            test3(matrices ,color,value.pos);
+
+        });
+        shaderIng = false;
     }
 }

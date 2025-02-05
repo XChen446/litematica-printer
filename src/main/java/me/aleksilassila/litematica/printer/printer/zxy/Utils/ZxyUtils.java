@@ -1,7 +1,6 @@
 package me.aleksilassila.litematica.printer.printer.zxy.Utils;
 
 import fi.dy.masa.malilib.config.IConfigOptionListEntry;
-import fi.dy.masa.malilib.util.Color4f;
 import me.aleksilassila.litematica.printer.LitematicaMixinMod;
 import me.aleksilassila.litematica.printer.printer.Printer;
 import me.aleksilassila.litematica.printer.printer.State;
@@ -15,12 +14,14 @@ import net.minecraft.block.BlockState;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.ShulkerBoxBlockEntity;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.enchantment.Enchantment;
-import net.minecraft.enchantment.EnchantmentHelper;
 import net.minecraft.entity.mob.ShulkerEntity;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.ItemStack;
+import net.minecraft.item.Items;
+import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
 import net.minecraft.registry.Registries;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
@@ -35,6 +36,7 @@ import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
 import org.jetbrains.annotations.NotNull;
 import org.lwjgl.glfw.GLFW;
+import it.unimi.dsi.fastutil.ints.Int2ObjectOpenHashMap;
 
 import java.util.*;
 //#if MC >= 12001
@@ -42,11 +44,15 @@ import me.aleksilassila.litematica.printer.printer.zxy.chesttracker.MemoryUtils;
 //#else
 //$$ import me.aleksilassila.litematica.printer.printer.zxy.memory.MemoryUtils;
 //#endif
-//#if MC > 12006
+//#if MC >= 12006
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.component.type.ItemEnchantmentsComponent;
 import net.minecraft.registry.entry.RegistryEntry;
+import net.minecraft.component.DataComponentTypes;
+import net.minecraft.component.type.NbtComponent;
+import net.minecraft.nbt.NbtCompound;
 //#endif
+import net.minecraft.enchantment.EnchantmentHelper;
 import static me.aleksilassila.litematica.printer.LitematicaMixinMod.SYNC_INVENTORY_CHECK;
 import static me.aleksilassila.litematica.printer.LitematicaMixinMod.SYNC_INVENTORY_COLOR;
 import static me.aleksilassila.litematica.printer.printer.zxy.inventory.OpenInventoryPacket.*;
@@ -74,9 +80,7 @@ public class ZxyUtils {
             //#endif
 
             for (String string : LitematicaMixinMod.INVENTORY_LIST.getStrings()) {
-                if (Printer.getPrinter() != null) {
-                    invBlockList.addAll(Printer.getPrinter().siftBlock(string));
-                }
+                invBlockList.addAll(Printer.getPrinter().siftBlock(string));
             }
             highlightPosList.addAll(invBlockList);
         }
@@ -110,7 +114,7 @@ public class ZxyUtils {
     public static ArrayList<ItemStack> targetBlockInv;
     public static int num = 0;
     static BlockPos blockPos = null;
-    static List<BlockPos> highlightPosList = new LinkedList<>();
+    static Set<BlockPos> highlightPosList = new LinkedHashSet<>();
     static Map<ItemStack,Integer> targetItemsCount = new HashMap<>();
     static Map<ItemStack,Integer> playerItemsCount = new HashMap<>();
 
@@ -132,9 +136,11 @@ public class ZxyUtils {
                 try {
                     if ((isInventory && blockState.createScreenHandlerFactory(client.world,pos) == null) ||
                             (blockEntity instanceof ShulkerBoxBlockEntity entity &&
-                                    //#if MC > 12004
-                                    !client.world.isSpaceEmpty(ShulkerEntity.calculateBoundingBox(1.0F, blockState.get(FACING), 0.0F, 0.5F).offset(pos).contract(1.0E-6)) &&
-                                    //#else
+                                    //#if MC > 12101
+                                    !client.world.isSpaceEmpty(ShulkerEntity.calculateBoundingBox(1.0F, blockState.get(FACING), 0.0F, 0.5F, pos.toBottomCenterPos()).offset(pos).contract(1.0E-6)) &&
+                                    //#elseif MC <= 12101 && MC > 12004
+                                    //$$ !client.world.isSpaceEmpty(ShulkerEntity.calculateBoundingBox(1.0F, blockState.get(FACING), 0.0F, 0.5F).offset(pos).contract(1.0E-6)) &&
+                                    //#elseif MC <= 12004
                                     //$$ !client.world.isSpaceEmpty(ShulkerEntity.calculateBoundingBox(blockState.get(FACING), 0.0f, 0.5f).offset(pos).contract(1.0E-6)) &&
                                     //#endif
                                     entity.getAnimationStage() == ShulkerBoxBlockEntity.AnimationStage.CLOSED)) {
@@ -375,7 +381,8 @@ public class ZxyUtils {
         return client.player != null && client.player.getEyePos().squaredDistanceTo(Vec3d.ofCenter(blockPos)) < range * range;
     }
     public static int getRage(){
-        return Math.max(getPrinterRange(),getCompulsionRange());
+        return getPrinterRange();
+//        return Math.max(getPrinterRange(),getCompulsionRange());
     }
     public static int getPrinterRange() {
 //        return LitematicaMixinMod.PRINTING_RANGE.getIntegerValue();
@@ -392,7 +399,7 @@ public class ZxyUtils {
         return 1000 / refreshRate;
 //        System.out.println("The monitor refresh rate is " + refreshRate);
     }
-    public static void reSet(){
+    public static void exitGameReSet(){
         SwitchItem.reSet();
         Verify.verify = null;
         BreakingFlowController.poslist = new ArrayList<>();
@@ -407,6 +414,35 @@ public class ZxyUtils {
         //#else
         client.interactionManager.interactBlock(client.player, hand,new BlockHitResult(vec3d, direction,pos,insideBlock));
         //#endif
+    }
+    public static Optional<ClientPlayerEntity> getPlayer(){
+        return Optional.ofNullable(client.player);
+    }
+    public static void refreshPlayerInventory(){
+        ClientPlayNetworkHandler networkHandler = client.getNetworkHandler();
+        if (getPlayer().isEmpty()) return;
+        ClientPlayerEntity player = getPlayer().get();
+        if(networkHandler == null) return;
+        ItemStack uniqueItem = new ItemStack(Items.STONE);
+
+        // Tags with NaN are not equal, so the server will find an inventory desync and send an inventory refresh to the client
+        //#if MC >= 12006
+        var nbt = new NbtCompound();
+        nbt.putDouble("force_sync", Double.NaN);
+        NbtComponent.set(DataComponentTypes.CUSTOM_DATA, uniqueItem, nbt);
+        //#else
+        //$$ uniqueItem.getOrCreateNbt().putDouble("force_resync", Double.NaN);
+        //#endif
+
+        networkHandler.sendPacket(new ClickSlotC2SPacket(
+                player.currentScreenHandler.syncId,
+                player.currentScreenHandler.getRevision(),
+                -999, 2,
+                SlotActionType.QUICK_CRAFT,
+                uniqueItem,
+                new Int2ObjectOpenHashMap<>()
+
+        ));
     }
 
     public static int getEnchantmentLevel(ItemStack itemStack,
@@ -431,7 +467,6 @@ public class ZxyUtils {
         //$$ return EnchantmentHelper.getLevel(enchantment,itemStack);
         //#endif
     }
-
 
     //右键单击
 //              client.interactionManager.clickSlot(sc.syncId, i, 1, SlotActionType.PICKUP, client.player);

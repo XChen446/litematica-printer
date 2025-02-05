@@ -8,7 +8,6 @@ import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemConvertible;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.ItemUsageContext;
-import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
@@ -32,6 +31,20 @@ public class BlockPlacer {
     }
 
 
+    private static float yaw;
+    private static float pitch;
+    private static void resetLook(){
+        sendLookPacket(yaw,pitch);
+    }
+    private static void sendLookPacket(float yaw,float pitch){
+        ClientPlayerEntity player = ZxyUtils.client.player;
+        if(player == null) return;
+        //#if MC > 12101
+        MinecraftClient.getInstance().getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(yaw, pitch, player.isOnGround(),player.horizontalCollision));
+        //#else
+        //$$ MinecraftClient.getInstance().getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(yaw, pitch, player.isOnGround()));
+        //#endif
+    }
 
     public static void pistonPlacement(BlockPos pos, Direction direction) {
         MinecraftClient minecraftClient = MinecraftClient.getInstance();
@@ -55,8 +68,9 @@ public class BlockPlacer {
                         pitch = 90f;
                         break;
                 }
-
-                minecraftClient.getNetworkHandler().sendPacket(new PlayerMoveC2SPacket.LookAndOnGround(player.getYaw(1.0f), pitch, player.isOnGround()));
+                yaw = player.getYaw();
+                BlockPlacer.pitch = player.getPitch();
+                sendLookPacket(player.getYaw(1.0f), pitch);
                 break;
         }
 
@@ -66,6 +80,7 @@ public class BlockPlacer {
         BlockHitResult hitResult = new BlockHitResult(vec3d, Direction.UP, pos, false);
 //        minecraftClient.interactionManager.interactBlock(minecraftClient.player, minecraftClient.world, Hand.MAIN_HAND, hitResult);
         placeBlockWithoutInteractingBlock(minecraftClient, hitResult);
+        resetLook();
     }
 
     private static void placeBlockWithoutInteractingBlock(MinecraftClient minecraftClient, BlockHitResult hitResult) {
@@ -79,7 +94,13 @@ public class BlockPlacer {
 //        minecraftClient.getNetworkHandler().sendPacket(new PlayerInteractBlockC2SPacket(Hand.OFF_HAND, hitResult,0));
 //        //#endif
 
-        if (!itemStack.isEmpty() && !player.getItemCooldownManager().isCoolingDown(itemStack.getItem())) {
+        if (!itemStack.isEmpty() && !player.getItemCooldownManager().isCoolingDown(
+                //#if MC > 12101
+                itemStack
+                //#else
+                //$$ itemStack.getItem()
+                //#endif
+        )) {
             ItemUsageContext itemUsageContext = new ItemUsageContext(player, Hand.OFF_HAND, hitResult);
             itemStack.useOnBlock(itemUsageContext);
 

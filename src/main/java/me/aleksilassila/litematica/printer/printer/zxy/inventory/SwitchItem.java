@@ -28,13 +28,14 @@ public class SwitchItem {
     public static Map<ItemStack,ItemStatistics> itemStacks = new HashMap<>();
     public static void removeItem(ItemStack itemStack){
         itemStacks.remove(itemStack);
+//        itemStacks.entrySet().removeIf(var -> var.getKey().getItem().equals(itemStack.getItem()));
     }
     public static void syncUseTime(ItemStack itemStack){
         ItemStatistics itemStatistics = itemStacks.get(itemStack);
         if(itemStatistics != null) itemStatistics.syncUseTime();
     }
     public static void newItem(ItemStack itemStack, BlockPos pos, RegistryKey<World> key, int slot, int shulkerBox){
-        itemStacks.put(itemStack,new ItemStatistics(key,pos,slot,shulkerBox));
+        if(shulkerBox != -1) itemStacks.put(itemStack,new ItemStatistics(key,pos,slot,shulkerBox));
     }
     public static void openInv(ItemStack itemStack){
         if(!client.player.currentScreenHandler.equals(client.player.playerScreenHandler) || Statistics.closeScreen > 0){
@@ -54,7 +55,7 @@ public class SwitchItem {
                 Statistics.closeScreen++;
             }else {
                 ScreenHandler sc = client.player.currentScreenHandler;
-                //因使用快捷濳影盒打开容器后无法更新，所以读取的盒子物品列表没意义。
+                //因使用快捷濳影盒打开物品列表后无法更新，所以读取的盒子物品列表没意义。
 //                DefaultedList<ItemStack> storedItems = InventoryUtils.getStoredItems(sc.slots.get(itemStatistics.shulkerBoxSlot).getStack(), -1);
 //                if(storedItems.get(itemStatistics.slot).isEmpty()){
                     try {
